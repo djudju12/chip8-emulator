@@ -424,36 +424,45 @@ int main(int argc, char **argv) {
             case OP_SUB: {
                 uint8_t x = (op & 0x0F00) >> 8;
                 uint8_t y = (op & 0x00F0) >> 4;
-                chip8.regs[0xF] = chip8.regs[x] > chip8.regs[y];
-                chip8.regs[x] -= chip8.regs[y];
+                uint8_t vx = chip8.regs[x];
+                uint8_t vy = chip8.regs[y];
+
+                chip8.regs[x] = vx - vy;
+                chip8.regs[0xF] = vx >= vy;
                 chip8.pc += 2;
             } break;
 
             // 8xy6 - SHR Vx {, Vy}
             case OP_SHR: {
-                // its very strang that we accept VY but dont use it
-                // I find that its normal behaviour -> https://chip8.gulrak.net/#quirk6
+                // I found very strange that we accept VY but dont use it
+                // Its actually a quirk -> https://chip8.gulrak.net/#quirk6
                 uint8_t x = (op & 0x0F00) >> 8;
-                chip8.regs[0xF] = chip8.regs[x] && 0x01;
+                uint8_t vx = chip8.regs[x];
                 chip8.regs[x] >>= 1;
+                chip8.regs[0xF] = vx & 0x01;
                 chip8.pc += 2;
             } break;
 
             // 8xyE - SHL Vx {, Vy}
             case OP_SHL: {
+                // I found very strange that we accept VY but dont use it
+                // Its actually a quirk -> https://chip8.gulrak.net/#quirk6
                 uint8_t x = (op & 0x0F00) >> 8;
-                chip8.regs[0xF] = chip8.regs[x] && 0x01;
+                uint8_t vx = chip8.regs[x];
                 chip8.regs[x] <<= 1;
+                chip8.regs[0xF] = (vx >> 7) & 0x01;
                 chip8.pc += 2;
             } break;
-
 
             // 8xy7 - SUBN Vx, Vy
             case OP_SUBN: {
                 uint8_t x = (op & 0x0F00) >> 8;
                 uint8_t y = (op & 0x00F0) >> 4;
-                chip8.regs[0xF] = chip8.regs[y] > chip8.regs[x];
-                chip8.regs[x] = chip8.regs[y] - chip8.regs[x];
+                uint8_t vx = chip8.regs[x];
+                uint8_t vy = chip8.regs[y];
+
+                chip8.regs[x] = vy - vx;
+                chip8.regs[0xF] = vy >= vx;
                 chip8.pc += 2;
             } break;
 
@@ -550,8 +559,8 @@ int main(int argc, char **argv) {
                 uint8_t x = (op & 0x0F00) >> 8;
                 uint8_t y = (op & 0x00F0) >> 4;
                 uint16_t t = chip8.regs[x] + chip8.regs[y];
-                chip8.regs[0xF] = t > 255;
                 chip8.regs[x] = t;
+                chip8.regs[0xF] = t > 255;
                 chip8.pc += 2;
             } break;
 

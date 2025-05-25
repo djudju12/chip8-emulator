@@ -186,18 +186,19 @@ static char *op_names[__OP_CNT__] = {
 // also specifies whether a particular pixel is to be drawn on the screen.
 
 #define MEMORY_SIZE 0x1000
+#define STACK_SIZE 0x10
 #define FRAME_W 64
 #define FRAME_H 32
 #define FRAME_BUFFER_SIZE FRAME_H*FRAME_W
 
 typedef struct {
     uint64_t frame_buffer[FRAME_H];
-    uint8_t sp;
+    int8_t sp;
     uint8_t delay_timer;
     uint8_t sound_timer;
-    uint8_t stack[0x40];
-    uint8_t regs[0x0F];
     uint8_t memory[MEMORY_SIZE];
+    uint8_t regs[0x10];
+    uint16_t stack[STACK_SIZE];
     uint16_t pc;
     uint16_t regi;
 } Chip8;
@@ -206,20 +207,20 @@ bool read_rom_to_memory(Chip8 *chip8, const char *rom) {
     bool status = true;
     FILE *file = fopen(rom, "rb");
     if (file == NULL) {
-        fprintf(stderr, "ERROR: could not open file %s: %s", rom, strerror(errno));
+        fprintf(stderr, "ERROR: could not open file %s: %s\n", rom, strerror(errno));
         status = false;
         goto ERROR;
     }
 
     long size;
     if (fseek(file, 0, SEEK_END) < 0 || (size = ftell(file)) < 0) {
-        fprintf(stderr, "ERROR: something went wrong in the reading of %s: %s", rom, strerror(errno));
+        fprintf(stderr, "ERROR: something went wrong in the reading of %s: %s\n", rom, strerror(errno));
         status = false;
         goto ERROR;
     }
 
     if (size >= MEMORY_SIZE - 0x200) {
-        fprintf(stderr, "ERROR: rom %s is too big. The specified size is %d and the program must start at 0x200", rom, MEMORY_SIZE);
+        fprintf(stderr, "ERROR: rom %s is too big. The specified size is %d and the program must start at 0x200\n", rom, MEMORY_SIZE);
         status = false;
         goto ERROR;
     }
@@ -260,6 +261,16 @@ Op_Type op_decode(Op op) {
     assert(0 && "unreacheable");
 }
 
+uint64_t rol(uint64_t x, uint8_t b) {
+    asm("rolq %1, %0"
+        : "=r"(x)           // Output operand: result goes into x
+        : "c"(b), "0"(x)    // Inputs: b goes into cl, x as input operand
+        :                   // No clobbers specified
+    );
+
+    return x;
+}
+
 bool is_pixel_active(Chip8 chip8, int x, int y) {
     return ((chip8.frame_buffer[y] << x) & ((uint64_t) 0x1 << 63)) != 0;
 }
@@ -289,14 +300,14 @@ void chip8_dump(Chip8 chip8) {
 }
 
 char *shift(int *argc, char ***argv) {
-    return (*argc)++, *(*argv)++;
+    return (*argc)--, *(*argv)++;
 }
 
 int main(int argc, char **argv) {
     char *program_name = shift(&argc, &argv);
     if (argc <= 0) {
         fprintf(stderr, "ERROR: missing ROM file\n");
-        printf("usage: %s <ROM.ch8>\n", program_name);
+        printf("    usage: %s <ROM.ch8>\n", program_name);
         return 1;
     }
 
@@ -326,113 +337,207 @@ int main(int argc, char **argv) {
         Op_Type type = op_decode(op);
 
 #if defined(DEBUG)
-        printf("FETCHED: 0x%04x | DECODED: %s [%d]\n", op, op_names[type], type);
+        printf("0x%04x: 0x%04x | DECODED: %s [%d]\n", chip8.pc, op, op_names[type], type);
 #endif
 
         switch (type) {
+
+            // 00E0 - CLS
             case OP_CLS: {
                 memset(chip8.frame_buffer, 0, sizeof(*chip8.frame_buffer)*FRAME_H);
                 chip8.pc += 2;
             } break;
 
+            // 00EE - RET
             case OP_RET: {
-                TODO("OP_RET");
+                if (chip8.sp <= 0) {
+                    fprintf(stderr, "ERROR: stack underflow\n");
+                    return 1;
+                }
+
+                chip8.pc = chip8.stack[--chip8.sp];
             } break;
 
+            // 2nnn - CALL addr
+            case OP_CALL: {
+                if (chip8.sp >= STACK_SIZE) {
+                    fprintf(stderr, "ERROR: stack overflow\n");
+                    return 1;
+                }
+
+                chip8.stack[chip8.sp++] = chip8.pc + 2;
+                chip8.pc = op & 0x0FFF;
+            } break;
+
+            // 0nnn - SYS addr
             case OP_SYS: {
                 TODO("OP_SYS");
             } break;
 
-            case OP_CALL: {
-                TODO("OP_CALL");
-            } break;
-
+            // 3xkk - SE Vx, byte
             case OP_SE_RB: {
-                TODO("OP_SE_RB");
-            } break;
-
-            case OP_SE_RR: {
-                TODO("OP_SE_RR");
-            } break;
-
-            case OP_OR: {
-                TODO("OP_OR");
-            } break;
-
-            case OP_AND: {
-                TODO("OP_AND");
-            } break;
-
-            case OP_XOR: {
-                TODO("OP_XOR");
-            } break;
-
-            case OP_SUB: {
-                TODO("OP_SUB");
-            } break;
-
-            case OP_SHR: {
-                TODO("OP_SHR");
-            } break;
-
-            case OP_SUBN: {
-                TODO("OP_SUBN");
-            } break;
-
-            case OP_SHL: {
-                TODO("OP_SHL");
-            } break;
-
-            case OP_SNE_R_B: {
-                TODO("OP_SNE_R_B");
-            } break;
-
-            case OP_SNE_R_R: {
-                TODO("OP_SNE_R_R");
-            } break;
-
-            case OP_JP_ADDR: {
-                chip8.pc = op & 0x0FFF;
-            } break;
-
-            case OP_JP_V0_ADDR: {
-                TODO("OP_JP_V0_ADDR");
-            } break;
-
-            case OP_RND: {
-                TODO("OP_RND");
-            } break;
-
-            // TODO: If this causes any pixels to be erased, VF is set to 1, otherwise it is set to 0.
-            case OP_DRW: {
-                int8_t x = 63 - chip8.regs[(op & 0x0F00) >> 8];
-
-                // TODO: If the sprite is positioned so part of it is outside the coordinates of the display, it wraps around to the opposite side of the screen.
-                // ASSERT(x >= 7 && "wrapround not implemented for x");
-
-                uint8_t y = chip8.regs[(op & 0x00F0) >> 4];
-                uint8_t n = op & 0x000F;
-                for (uint8_t i = 0; i < n; i++, y++) {
-                    y %= FRAME_H;
-                    uint8_t sprite_byte = chip8.memory[chip8.regi + i];
-                    uint8_t current_byte = (chip8.frame_buffer[y] << x) & ((uint64_t) 0xFF << 56);
-                    uint8_t xored_byte = sprite_byte ^ current_byte;
-
-                    chip8.frame_buffer[y] &= ~((uint64_t)0xFF << (x - 7)); // Clear the current byte
-                    chip8.frame_buffer[y] |= ((uint64_t)xored_byte << (x - 7)); // Set the new byte
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t k = op & 0x0FF;
+                if (chip8.regs[x] == k) {
+                    chip8.pc += 2;
                 }
 
                 chip8.pc += 2;
             } break;
 
+            // 5xy0 - SE Vx, Vy
+            case OP_SE_RR: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                if (chip8.regs[x] == chip8.regs[y]) {
+                    chip8.pc += 2;
+                }
+
+                chip8.pc += 2;
+            } break;
+
+            // 8xy1 - OR Vx, Vy
+            case OP_OR: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                chip8.regs[x] |= chip8.regs[y];
+                chip8.pc += 2;
+            } break;
+
+            // 8xy2 - AND Vx, Vy
+            case OP_AND: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                chip8.regs[x] &= chip8.regs[y];
+                chip8.pc += 2;
+            } break;
+
+            // 8xy3 - XOR Vx, Vy
+            case OP_XOR: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                chip8.regs[x] ^= chip8.regs[y];
+                chip8.pc += 2;
+            } break;
+
+            // 8xy5 - SUB Vx, Vy
+            case OP_SUB: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                chip8.regs[0xF] = chip8.regs[x] > chip8.regs[y];
+                chip8.regs[x] -= chip8.regs[y];
+                chip8.pc += 2;
+            } break;
+
+            // 8xy6 - SHR Vx {, Vy}
+            case OP_SHR: {
+                // its very strang that we accept VY but dont use it
+                // I find that its normal behaviour -> https://chip8.gulrak.net/#quirk6
+                uint8_t x = (op & 0x0F00) >> 8;
+                chip8.regs[0xF] = chip8.regs[x] && 0x01;
+                chip8.regs[x] >>= 1;
+                chip8.pc += 2;
+            } break;
+
+            // 8xyE - SHL Vx {, Vy}
+            case OP_SHL: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                chip8.regs[0xF] = chip8.regs[x] && 0x01;
+                chip8.regs[x] <<= 1;
+                chip8.pc += 2;
+            } break;
+
+
+            // 8xy7 - SUBN Vx, Vy
+            case OP_SUBN: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                chip8.regs[0xF] = chip8.regs[y] > chip8.regs[x];
+                chip8.regs[x] = chip8.regs[y] - chip8.regs[x];
+                chip8.pc += 2;
+            } break;
+
+            // 4xkk - SNE Vx, byte
+            case OP_SNE_R_B: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t k = op & 0x0FF;
+                if (chip8.regs[x] != k) {
+                    chip8.pc += 2;
+                }
+
+                chip8.pc += 2;
+            } break;
+
+            // 9xy0 - SNE Vx, Vy
+            case OP_SNE_R_R: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                if (chip8.regs[x] != chip8.regs[y]) {
+                    chip8.pc += 2;
+                }
+
+                chip8.pc += 2;
+            } break;
+
+            // 1nnn - JP addr
+            case OP_JP_ADDR: {
+                chip8.pc = op & 0x0FFF;
+            } break;
+
+            // Bnnn - JP V0, addr
+            case OP_JP_V0_ADDR: {
+                TODO("OP_JP_V0_ADDR");
+            } break;
+
+            // Cxkk - RND Vx, byte
+            case OP_RND: {
+                TODO("OP_RND");
+            } break;
+
+            // Dxyn - DRW Vx, Vy, nibble
+            case OP_DRW: {
+                chip8.regs[0xF] = 0;
+                int8_t x = 63 - chip8.regs[(op & 0x0F00) >> 8];
+                uint8_t y = chip8.regs[(op & 0x00F0) >> 4];
+                uint8_t n = op & 0x000F;
+                for (uint8_t i = 0; i < n; i++, y++) {
+                    y %= FRAME_H;
+                    uint8_t sprite_byte = chip8.memory[chip8.regi + i];
+                    for (uint8_t k = 0; k < 8; k++) {
+                        int8_t index = x - k;
+                        if (index < 0) {
+                            index += 64;
+                        }
+
+                        uint8_t current_bit = chip8.frame_buffer[y] & ((uint64_t)1 << index);
+
+                        uint64_t sprite_bit = (sprite_byte >> (7 - k)) & 1; // Get the bit from the sprite
+                        chip8.frame_buffer[y] ^= sprite_bit << index;       // Set the sprite bit on the frame buffer
+
+                        // XOR
+                        // C S R
+                        // 0 0 0
+                        // 0 1 1
+                        // 1 0 1
+                        // 1 1 0 -> erased
+                        chip8.regs[0xF] |= !(current_bit && sprite_bit);
+                    }
+                }
+
+                chip8.pc += 2;
+            } break;
+
+            // Ex9E - SKP Vx
             case OP_SKP: {
                 TODO("OP_SKP");
             } break;
 
+            // ExA1 - SKNP Vx
             case OP_SKNP: {
                 TODO("OP_SKNP");
             } break;
 
+            // 7xkk - ADD Vx, byte
             case OP_ADD_R_B: {
                 uint8_t x = (op & 0x0F00) >> 8;
                 uint8_t value = op & 0x00FF;
@@ -440,59 +545,117 @@ int main(int argc, char **argv) {
                 chip8.pc += 2;
             } break;
 
+            // 8xy4 - ADD Vx, Vy
             case OP_ADD_R_R: {
-                TODO("OP_ADD_R_R");
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                uint16_t t = chip8.regs[x] + chip8.regs[y];
+                chip8.regs[0xF] = t > 255;
+                chip8.regs[x] = t;
+                chip8.pc += 2;
             } break;
 
+            // Fx1E - ADD I, Vx
             case OP_ADD_I_R: {
-                TODO("OP_ADD_I_R");
+                uint8_t x = (op & 0x0F00) >> 8;
+                chip8.regi += chip8.regs[x];
+                chip8.pc += 2;
             } break;
 
+            // 6xkk - LD Vx, byte
             case OP_LD_R_B: {
                 uint8_t x = (op & 0x0F00) >> 8;
                 chip8.regs[x] = op & 0x00FF;
                 chip8.pc += 2;
             } break;
 
+            // 8xy0 - LD Vx, Vy
             case OP_LD_R_R: {
-                TODO("OP_LD_R_R");
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t y = (op & 0x00F0) >> 4;
+                chip8.regs[x] = chip8.regs[y];
+                chip8.pc += 2;
             } break;
 
+            // Annn - LD I, addr
             case OP_LD_I_ADDR: {
                 chip8.regi = op & 0x0FFF;
                 chip8.pc += 2;
             } break;
 
+            // Fx07 - LD Vx, DT
             case OP_LD_R_DT: {
                 TODO("OP_LD_R_DT");
             } break;
 
+            // Fx0A - LD Vx, K
             case OP_LD_R_K: {
                 TODO("OP_LD_R_K");
             } break;
 
+            // Fx15 - LD DT, Vx
             case OP_LD_DT_R: {
                 TODO("OP_LD_DT_R");
             } break;
 
+            // Fx18 - LD ST, Vx
             case OP_LD_ST_R: {
                 TODO("OP_LD_ST_R");
             } break;
 
+            // Fx29 - LD F, Vx
             case OP_LD_FONT_R: {
                 TODO("OP_LD_FONT_R");
             } break;
 
+            // Fx33 - LD B, Vx
             case OP_LD_BCD_R: {
-                TODO("OP_LD_BCD_R");
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint16_t start = chip8.regi;
+                if (start >= (MEMORY_SIZE - 3)) {
+                    printf("ERROR: OP_LD_BCD_R out of bounds\n");
+                    return 1;
+                }
+
+                uint8_t v = chip8.regs[x];
+                chip8.memory[start + 0] = v / 100;
+                chip8.memory[start + 1] = (v / 10) % 10;
+                chip8.memory[start + 2] = (v % 10) % 10;
+                chip8.pc += 2;
             } break;
 
+            // Fx55 - LD [I], Vx
             case OP_LD_IMEM_R: {
-                TODO("OP_LD_IMEM_R");
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint16_t start = chip8.regi;
+                for (uint8_t i = 0; i <= x; i++) {
+                    uint16_t mem = start + i;
+                    if (mem >= MEMORY_SIZE) {
+                        printf("ERROR: OP_LD_R_IMEM out of bounds\n");
+                        return 1;
+                    }
+
+                    chip8.memory[mem] = chip8.regs[i];
+                }
+
+                chip8.pc += 2;
             } break;
 
+            // Fx65 - LD Vx, [I]
             case OP_LD_R_IMEM: {
-                TODO("OP_LD_R_IMEM");
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint16_t start = chip8.regi;
+                for (uint8_t i = 0; i <= x; i++) {
+                    uint16_t mem = start + i;
+                    if (mem >= MEMORY_SIZE) {
+                        printf("ERROR: OP_LD_R_IMEM out of bounds\n");
+                        return 1;
+                    }
+
+                    chip8.regs[i] = chip8.memory[mem];
+                }
+
+                chip8.pc += 2;
             } break;
 
             default: {

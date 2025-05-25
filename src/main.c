@@ -1,0 +1,512 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <errno.h>
+#include <stdint.h>
+#include <assert.h>
+#include <raylib.h>
+
+#define ASSERT assert
+// each pixel in the frame buffer will map to WINDOW_FACTOR in the pc
+// running the emulator
+#define WINDOW_FACTOR 10
+
+#define TODO(msg) ASSERT(0 && msg)
+
+// http://devernay.free.fr/hacks/chip8/C8TECH10.HTM
+// 3.1 - Standard Chip-8 Instructions
+// 00E0 - CLS
+// 00EE - RET
+// 0nnn - SYS addr
+// 2nnn - CALL addr
+// 3xkk - SE Vx, byte
+// 5xy0 - SE Vx, Vy
+// 8xy1 - OR Vx, Vy
+// 8xy2 - AND Vx, Vy
+// 8xy3 - XOR Vx, Vy
+// 8xy5 - SUB Vx, Vy
+// 8xy6 - SHR Vx {, Vy}
+// 8xy7 - SUBN Vx, Vy
+// 8xyE - SHL Vx {, Vy}
+// 4xkk - SNE Vx, byte
+// 9xy0 - SNE Vx, Vy
+// 1nnn - JP addr
+// Bnnn - JP V0, addr
+// Cxkk - RND Vx, byte
+// Dxyn - DRW Vx, Vy, nibble
+// Ex9E - SKP Vx
+// ExA1 - SKNP Vx
+// 7xkk - ADD Vx, byte
+// 8xy4 - ADD Vx, Vy
+// Fx1E - ADD I, Vx
+// 6xkk - LD Vx, byte
+// 8xy0 - LD Vx, Vy
+// Annn - LD I, addr
+// Fx07 - LD Vx, DT
+// Fx0A - LD Vx, K
+// Fx15 - LD DT, Vx
+// Fx18 - LD ST, Vx
+// Fx29 - LD F, Vx
+// Fx33 - LD B, Vx
+// Fx55 - LD [I], Vx
+// Fx65 - LD Vx, [I]
+
+typedef enum {
+    OP_CLS = 0    ,
+    OP_RET        ,
+    OP_SYS        ,
+    OP_CALL       ,
+    OP_SE_RB      ,
+    OP_SE_RR      ,
+    OP_OR         ,
+    OP_AND        ,
+    OP_XOR        ,
+    OP_SUB        ,
+    OP_SHR        ,
+    OP_SUBN       ,
+    OP_SHL        ,
+    OP_SNE_R_B    ,
+    OP_SNE_R_R    ,
+    OP_JP_ADDR    ,
+    OP_JP_V0_ADDR ,
+    OP_RND        ,
+    OP_DRW        ,
+    OP_SKP        ,
+    OP_SKNP       ,
+    OP_ADD_R_B    ,
+    OP_ADD_R_R    ,
+    OP_ADD_I_R    ,
+    OP_LD_R_B     ,
+    OP_LD_R_R     ,
+    OP_LD_I_ADDR  ,
+    OP_LD_R_DT    ,
+    OP_LD_R_K     ,
+    OP_LD_DT_R    ,
+    OP_LD_ST_R    ,
+    OP_LD_FONT_R  ,
+    OP_LD_BCD_R   ,
+    OP_LD_IMEM_R  ,
+    OP_LD_R_IMEM  ,
+    __OP_CNT__
+} Op_Type;
+
+typedef uint16_t Op;
+
+typedef struct {
+    uint16_t mask, value;
+} Op_Pattern;
+
+static Op_Pattern op_decode_table[__OP_CNT__] = {
+    [OP_CLS]         = { 0xFFFF, 0x00E0 },
+    [OP_RET]         = { 0xFFFF, 0x00EE },
+    [OP_SYS]         = { 0xF000, 0x0000 },
+    [OP_CALL]        = { 0xF000, 0x2000 },
+    [OP_SE_RB]       = { 0xF000, 0x3000 },
+    [OP_SE_RR]       = { 0xF000, 0x5000 },
+    [OP_OR]          = { 0xF00F, 0x8001 },
+    [OP_AND]         = { 0xF00F, 0x8002 },
+    [OP_XOR]         = { 0xF00F, 0x8003 },
+    [OP_SUB]         = { 0xF00F, 0x8005 },
+    [OP_SHR]         = { 0xF00F, 0x8006 },
+    [OP_SUBN]        = { 0xF00F, 0x8007 },
+    [OP_SHL]         = { 0xF00F, 0x800E },
+    [OP_SNE_R_B]     = { 0xF000, 0x4000 },
+    [OP_SNE_R_R]     = { 0xF00F, 0x9000 },
+    [OP_JP_ADDR]     = { 0xF000, 0x1000 },
+    [OP_JP_V0_ADDR]  = { 0xF000, 0xB000 },
+    [OP_RND]         = { 0xF000, 0xC000 },
+    [OP_DRW]         = { 0xF000, 0xD000 },
+    [OP_SKP]         = { 0xF0FF, 0xE09E },
+    [OP_SKNP]        = { 0xF0FF, 0xE0A1 },
+    [OP_ADD_R_B]     = { 0xF000, 0x7000 },
+    [OP_ADD_R_R]     = { 0xF00F, 0x8004 },
+    [OP_ADD_I_R]     = { 0xF0FF, 0xF01E },
+    [OP_LD_R_B]      = { 0xF000, 0x6000 },
+    [OP_LD_R_R]      = { 0xF00F, 0x8000 },
+    [OP_LD_I_ADDR]   = { 0xF000, 0xA000 },
+    [OP_LD_R_DT]     = { 0xF0FF, 0xF007 },
+    [OP_LD_R_K]      = { 0xF0FF, 0xF00A },
+    [OP_LD_DT_R]     = { 0xF0FF, 0xF015 },
+    [OP_LD_ST_R]     = { 0xF0FF, 0xF018 },
+    [OP_LD_FONT_R]   = { 0xF0FF, 0xF029 },
+    [OP_LD_BCD_R]    = { 0xF0FF, 0xF033 },
+    [OP_LD_IMEM_R]   = { 0xF0FF, 0xF055 },
+    [OP_LD_R_IMEM]   = { 0xF0FF, 0xF065 }
+};
+
+static char *op_names[__OP_CNT__] = {
+    [OP_CLS]         = "OP_CLS",
+    [OP_RET]         = "OP_RET",
+    [OP_SYS]         = "OP_SYS",
+    [OP_CALL]        = "OP_CALL",
+    [OP_SE_RB]       = "OP_SE_RB",
+    [OP_SE_RR]       = "OP_SE_RR",
+    [OP_OR]          = "OP_OR",
+    [OP_AND]         = "OP_AND",
+    [OP_XOR]         = "OP_XOR",
+    [OP_SUB]         = "OP_SUB",
+    [OP_SHR]         = "OP_SHR",
+    [OP_SUBN]        = "OP_SUBN",
+    [OP_SHL]         = "OP_SHL",
+    [OP_SNE_R_B]     = "OP_SNE_R_B",
+    [OP_SNE_R_R]     = "OP_SNE_R_R",
+    [OP_JP_ADDR]     = "OP_JP_ADDR",
+    [OP_JP_V0_ADDR]  = "OP_JP_V0_ADDR",
+    [OP_RND]         = "OP_RND",
+    [OP_DRW]         = "OP_DRW",
+    [OP_SKP]         = "OP_SKP",
+    [OP_SKNP]        = "OP_SKNP",
+    [OP_ADD_R_B]     = "OP_ADD_R_B",
+    [OP_ADD_R_R]     = "OP_ADD_R_R",
+    [OP_ADD_I_R]     = "OP_ADD_I_R",
+    [OP_LD_R_B]      = "OP_LD_R_B",
+    [OP_LD_R_R]      = "OP_LD_R_R",
+    [OP_LD_I_ADDR]   = "OP_LD_I_ADDR",
+    [OP_LD_R_DT]     = "OP_LD_R_DT",
+    [OP_LD_R_K]      = "OP_LD_R_K",
+    [OP_LD_DT_R]     = "OP_LD_DT_R",
+    [OP_LD_ST_R]     = "OP_LD_ST_R",
+    [OP_LD_FONT_R]   = "OP_LD_FONT_R",
+    [OP_LD_BCD_R]    = "OP_LD_BCD_R",
+    [OP_LD_IMEM_R]   = "OP_LD_IMEM_R",
+    [OP_LD_R_IMEM]   = "OP_LD_R_IMEM"
+};
+
+// - The sound and delay timers sequentially decrease at a rate of 1 per tick of a 60Hz clock. When the
+// sound timer is above 0, the sound will play as a single monotone beep.
+
+// - The framebuffer is an (x, y) addressable memory array that designates whether a pixel is currently on
+// or off. This will be implemented with a write address, an (x, y) position, a offset in the x direction,
+// and an 8-bit group of pixels to be drawn to the screen.
+
+// - The return address stack stores previous program counters when jumping into a new routine.
+
+// - The VF register is frequently used for storing carry values from a subtraction or addition action, and
+// also specifies whether a particular pixel is to be drawn on the screen.
+
+#define MEMORY_SIZE 0x1000
+#define FRAME_W 64
+#define FRAME_H 32
+#define FRAME_BUFFER_SIZE FRAME_H*FRAME_W
+
+typedef struct {
+    uint64_t frame_buffer[FRAME_H];
+    uint8_t sp;
+    uint8_t delay_timer;
+    uint8_t sound_timer;
+    uint8_t stack[0x40];
+    uint8_t regs[0x0F];
+    uint8_t memory[MEMORY_SIZE];
+    uint16_t pc;
+    uint16_t regi;
+} Chip8;
+
+bool read_rom_to_memory(Chip8 *chip8, const char *rom) {
+    bool status = true;
+    FILE *file = fopen(rom, "rb");
+    if (file == NULL) {
+        fprintf(stderr, "ERROR: could not open file %s: %s", rom, strerror(errno));
+        status = false;
+        goto ERROR;
+    }
+
+    long size;
+    if (fseek(file, 0, SEEK_END) < 0 || (size = ftell(file)) < 0) {
+        fprintf(stderr, "ERROR: something went wrong in the reading of %s: %s", rom, strerror(errno));
+        status = false;
+        goto ERROR;
+    }
+
+    if (size >= MEMORY_SIZE - 0x200) {
+        fprintf(stderr, "ERROR: rom %s is too big. The specified size is %d and the program must start at 0x200", rom, MEMORY_SIZE);
+        status = false;
+        goto ERROR;
+    }
+
+    rewind(file);
+    if ((long) fread(chip8->memory + 0x200, sizeof(*chip8->memory)*size, size, file) == 0) {
+        fprintf(stderr, "ERROR: could not read entire file %s: %s\n", rom, strerror(errno));
+        status = false;
+        goto ERROR;
+    }
+
+ERROR:
+    if (file) {
+        fclose(file);
+    }
+
+    return status;
+}
+
+Op op_fetch(Chip8 chip8) {
+    uint16_t addr = chip8.pc;
+    if (addr > MEMORY_SIZE - 1) {
+        fprintf(stderr, "ERROR: trying to accessing a out of bound adress (%d)\n", addr);
+        exit(1);
+    }
+
+    return chip8.memory[addr] << 8 | chip8.memory[addr + 1];
+}
+
+Op_Type op_decode(Op op) {
+    for (Op_Type type = 0; type < __OP_CNT__; type++) {
+        Op_Pattern op_pattern = op_decode_table[type];
+        if ((op_pattern.mask & op) == op_pattern.value) {
+            return type;
+        }
+    }
+
+    assert(0 && "unreacheable");
+}
+
+bool is_pixel_active(Chip8 chip8, int x, int y) {
+    return ((chip8.frame_buffer[y] << x) & ((uint64_t) 0x1 << 63)) != 0;
+}
+
+void blit_frame_buffer(Chip8 chip8) {
+    for (size_t y = 0; y < FRAME_H; y++) {
+        for (size_t x = 0; x < FRAME_W; x++) {
+            if (is_pixel_active(chip8, x, y)) {
+                DrawRectangle(x*WINDOW_FACTOR, y*WINDOW_FACTOR, WINDOW_FACTOR, WINDOW_FACTOR, WHITE);
+            } else {
+                DrawRectangle(x*WINDOW_FACTOR, y*WINDOW_FACTOR, WINDOW_FACTOR, WINDOW_FACTOR, BLACK);
+            }
+        }
+    }
+}
+
+void chip8_dump(Chip8 chip8) {
+    for (int i = 0; i < MEMORY_SIZE;) {
+        printf("0x%04x: ", i);
+        for (int k = 0; i < MEMORY_SIZE && k < 8; k++, i += 2) {
+            uint16_t x = chip8.memory[i] << 8 | chip8.memory[i + 1];
+            printf("%04x ", x);
+        }
+
+        printf("\n");
+    }
+}
+
+char *shift(int *argc, char ***argv) {
+    return (*argc)++, *(*argv)++;
+}
+
+int main(int argc, char **argv) {
+    char *program_name = shift(&argc, &argv);
+    if (argc <= 0) {
+        fprintf(stderr, "ERROR: missing ROM file\n");
+        printf("usage: %s <ROM.ch8>\n", program_name);
+        return 1;
+    }
+
+
+    Chip8 chip8 = {0};
+    char *rom = shift(&argc, &argv);
+    if (!read_rom_to_memory(&chip8, rom)) {
+        return 1;
+    }
+
+    chip8.pc = 0x200;
+
+#if defined(DUMP_AND_DIE)
+    chip8_dump(chip8);
+    return 0;
+#endif
+
+#if defined(DEBUG)
+    chip8_dump(chip8);
+#endif
+
+    SetTraceLogLevel(LOG_ERROR);
+    InitWindow(FRAME_W*WINDOW_FACTOR, FRAME_H*WINDOW_FACTOR, "Chip8");
+
+    while (!WindowShouldClose()) {
+        Op op = op_fetch(chip8);
+        Op_Type type = op_decode(op);
+
+#if defined(DEBUG)
+        printf("FETCHED: 0x%04x | DECODED: %s [%d]\n", op, op_names[type], type);
+#endif
+
+        switch (type) {
+            case OP_CLS: {
+                memset(chip8.frame_buffer, 0, sizeof(*chip8.frame_buffer)*FRAME_H);
+                chip8.pc += 2;
+            } break;
+
+            case OP_RET: {
+                TODO("OP_RET");
+            } break;
+
+            case OP_SYS: {
+                TODO("OP_SYS");
+            } break;
+
+            case OP_CALL: {
+                TODO("OP_CALL");
+            } break;
+
+            case OP_SE_RB: {
+                TODO("OP_SE_RB");
+            } break;
+
+            case OP_SE_RR: {
+                TODO("OP_SE_RR");
+            } break;
+
+            case OP_OR: {
+                TODO("OP_OR");
+            } break;
+
+            case OP_AND: {
+                TODO("OP_AND");
+            } break;
+
+            case OP_XOR: {
+                TODO("OP_XOR");
+            } break;
+
+            case OP_SUB: {
+                TODO("OP_SUB");
+            } break;
+
+            case OP_SHR: {
+                TODO("OP_SHR");
+            } break;
+
+            case OP_SUBN: {
+                TODO("OP_SUBN");
+            } break;
+
+            case OP_SHL: {
+                TODO("OP_SHL");
+            } break;
+
+            case OP_SNE_R_B: {
+                TODO("OP_SNE_R_B");
+            } break;
+
+            case OP_SNE_R_R: {
+                TODO("OP_SNE_R_R");
+            } break;
+
+            case OP_JP_ADDR: {
+                chip8.pc = op & 0x0FFF;
+            } break;
+
+            case OP_JP_V0_ADDR: {
+                TODO("OP_JP_V0_ADDR");
+            } break;
+
+            case OP_RND: {
+                TODO("OP_RND");
+            } break;
+
+            // TODO: If this causes any pixels to be erased, VF is set to 1, otherwise it is set to 0.
+            case OP_DRW: {
+                int8_t x = 63 - chip8.regs[(op & 0x0F00) >> 8];
+
+                // TODO: If the sprite is positioned so part of it is outside the coordinates of the display, it wraps around to the opposite side of the screen.
+                // ASSERT(x >= 7 && "wrapround not implemented for x");
+
+                uint8_t y = chip8.regs[(op & 0x00F0) >> 4];
+                uint8_t n = op & 0x000F;
+                for (uint8_t i = 0; i < n; i++, y++) {
+                    y %= FRAME_H;
+                    uint8_t sprite_byte = chip8.memory[chip8.regi + i];
+                    uint8_t current_byte = (chip8.frame_buffer[y] << x) & ((uint64_t) 0xFF << 56);
+                    uint8_t xored_byte = sprite_byte ^ current_byte;
+
+                    chip8.frame_buffer[y] &= ~((uint64_t)0xFF << (x - 7)); // Clear the current byte
+                    chip8.frame_buffer[y] |= ((uint64_t)xored_byte << (x - 7)); // Set the new byte
+                }
+
+                chip8.pc += 2;
+            } break;
+
+            case OP_SKP: {
+                TODO("OP_SKP");
+            } break;
+
+            case OP_SKNP: {
+                TODO("OP_SKNP");
+            } break;
+
+            case OP_ADD_R_B: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t value = op & 0x00FF;
+                chip8.regs[x] += value;
+                chip8.pc += 2;
+            } break;
+
+            case OP_ADD_R_R: {
+                TODO("OP_ADD_R_R");
+            } break;
+
+            case OP_ADD_I_R: {
+                TODO("OP_ADD_I_R");
+            } break;
+
+            case OP_LD_R_B: {
+                uint8_t x = (op & 0x0F00) >> 8;
+                chip8.regs[x] = op & 0x00FF;
+                chip8.pc += 2;
+            } break;
+
+            case OP_LD_R_R: {
+                TODO("OP_LD_R_R");
+            } break;
+
+            case OP_LD_I_ADDR: {
+                chip8.regi = op & 0x0FFF;
+                chip8.pc += 2;
+            } break;
+
+            case OP_LD_R_DT: {
+                TODO("OP_LD_R_DT");
+            } break;
+
+            case OP_LD_R_K: {
+                TODO("OP_LD_R_K");
+            } break;
+
+            case OP_LD_DT_R: {
+                TODO("OP_LD_DT_R");
+            } break;
+
+            case OP_LD_ST_R: {
+                TODO("OP_LD_ST_R");
+            } break;
+
+            case OP_LD_FONT_R: {
+                TODO("OP_LD_FONT_R");
+            } break;
+
+            case OP_LD_BCD_R: {
+                TODO("OP_LD_BCD_R");
+            } break;
+
+            case OP_LD_IMEM_R: {
+                TODO("OP_LD_IMEM_R");
+            } break;
+
+            case OP_LD_R_IMEM: {
+                TODO("OP_LD_R_IMEM");
+            } break;
+
+            default: {
+                fprintf(stderr, "ERROR: op %04x not implemented", op);
+                return 1;
+            }
+        }
+
+        BeginDrawing();
+        blit_frame_buffer(chip8);
+        EndDrawing();
+    }
+
+    CloseWindow();
+
+    return 0;
+}

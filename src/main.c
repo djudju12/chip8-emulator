@@ -193,29 +193,24 @@ static char *op_names[__OP_CNT__] = {
 
 enum {
     CHIP8_KEY_1 = 0b1000000000000000,
-    CHIP8_KEY_2 = 0x0100000000000000,
-    CHIP8_KEY_3 = 0x0010000000000000,
-    CHIP8_KEY_C = 0x0001000000000000,
-    CHIP8_KEY_4 = 0x0000100000000000,
-    CHIP8_KEY_5 = 0x0000010000000000,
-    CHIP8_KEY_6 = 0x0000001000000000,
-    CHIP8_KEY_D = 0x0000000100000000,
-    CHIP8_KEY_7 = 0x0000000010000000,
-    CHIP8_KEY_8 = 0x0000000001000000,
-    CHIP8_KEY_9 = 0x0000000000100000,
-    CHIP8_KEY_E = 0x0000000000010000,
-    CHIP8_KEY_A = 0x0000000000001000,
-    CHIP8_KEY_0 = 0x0000000000000100,
-    CHIP8_KEY_B = 0x0000000000000010,
-    CHIP8_KEY_F = 0x0000000000000001
+    CHIP8_KEY_2 = 0b0100000000000000,
+    CHIP8_KEY_3 = 0b0010000000000000,
+    CHIP8_KEY_C = 0b0001000000000000,
+    CHIP8_KEY_4 = 0b0000100000000000,
+    CHIP8_KEY_5 = 0b0000010000000000,
+    CHIP8_KEY_6 = 0b0000001000000000,
+    CHIP8_KEY_D = 0b0000000100000000,
+    CHIP8_KEY_7 = 0b0000000010000000,
+    CHIP8_KEY_8 = 0b0000000001000000,
+    CHIP8_KEY_9 = 0b0000000000100000,
+    CHIP8_KEY_E = 0b0000000000010000,
+    CHIP8_KEY_A = 0b0000000000001000,
+    CHIP8_KEY_0 = 0b0000000000000100,
+    CHIP8_KEY_B = 0b0000000000000010,
+    CHIP8_KEY_F = 0b0000000000000001
 };
 
-typedef struct {
-    uint8_t chip8;
-    int raylib;
-} Ray2Chip8_Keyboard;
-
-static struct { uint8_t chip8; int raylib; }
+static struct { uint16_t chip8; int raylib; }
 keyboard_decode_table[0x10] = {
     [0x1] = { .chip8 = CHIP8_KEY_1 , .raylib = KEY_ONE    } ,
     [0x2] = { .chip8 = CHIP8_KEY_2 , .raylib = KEY_TWO    } ,
@@ -614,7 +609,18 @@ int main(int argc, char **argv) {
 
             // ExA1 - SKNP Vx
             case OP_SKNP: {
-                TODO("OP_SKNP");
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t key = chip8.regs[x];
+                if (key > 0xF) {
+                    fprintf(stderr, "ERROR: invalid key %d\n", key);
+                    return 1;
+                }
+
+                if (!(chip8.keyboard & keyboard_decode_table[key].chip8)) {
+                    chip8.pc += 2;
+                }
+
+                chip8.pc += 2;
             } break;
 
             // 7xkk - ADD Vx, byte

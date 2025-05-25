@@ -191,6 +191,50 @@ static char *op_names[__OP_CNT__] = {
 #define FRAME_H 32
 #define FRAME_BUFFER_SIZE FRAME_H*FRAME_W
 
+enum {
+    CHIP8_KEY_1 = 0b1000000000000000,
+    CHIP8_KEY_2 = 0x0100000000000000,
+    CHIP8_KEY_3 = 0x0010000000000000,
+    CHIP8_KEY_C = 0x0001000000000000,
+    CHIP8_KEY_4 = 0x0000100000000000,
+    CHIP8_KEY_5 = 0x0000010000000000,
+    CHIP8_KEY_6 = 0x0000001000000000,
+    CHIP8_KEY_D = 0x0000000100000000,
+    CHIP8_KEY_7 = 0x0000000010000000,
+    CHIP8_KEY_8 = 0x0000000001000000,
+    CHIP8_KEY_9 = 0x0000000000100000,
+    CHIP8_KEY_E = 0x0000000000010000,
+    CHIP8_KEY_A = 0x0000000000001000,
+    CHIP8_KEY_0 = 0x0000000000000100,
+    CHIP8_KEY_B = 0x0000000000000010,
+    CHIP8_KEY_F = 0x0000000000000001
+};
+
+typedef struct {
+    uint8_t chip8;
+    int raylib;
+} Ray2Chip8_Keyboard;
+
+static struct { uint8_t chip8; int raylib; }
+keyboard_decode_table[0x10] = {
+    [0x1] = { .chip8 = CHIP8_KEY_1 , .raylib = KEY_ONE    } ,
+    [0x2] = { .chip8 = CHIP8_KEY_2 , .raylib = KEY_TWO    } ,
+    [0x3] = { .chip8 = CHIP8_KEY_3 , .raylib = KEY_THREE  } ,
+    [0xC] = { .chip8 = CHIP8_KEY_C , .raylib = KEY_C      } ,
+    [0x4] = { .chip8 = CHIP8_KEY_4 , .raylib = KEY_FOUR   } ,
+    [0x5] = { .chip8 = CHIP8_KEY_5 , .raylib = KEY_FIVE   } ,
+    [0x6] = { .chip8 = CHIP8_KEY_6 , .raylib = KEY_SIX    } ,
+    [0xD] = { .chip8 = CHIP8_KEY_D , .raylib = KEY_D      } ,
+    [0x7] = { .chip8 = CHIP8_KEY_7 , .raylib = KEY_SEVEN  } ,
+    [0x8] = { .chip8 = CHIP8_KEY_8 , .raylib = KEY_EIGHT  } ,
+    [0x9] = { .chip8 = CHIP8_KEY_9 , .raylib = KEY_NINE   } ,
+    [0xE] = { .chip8 = CHIP8_KEY_E , .raylib = KEY_E      } ,
+    [0xA] = { .chip8 = CHIP8_KEY_A , .raylib = KEY_A      } ,
+    [0x0] = { .chip8 = CHIP8_KEY_0 , .raylib = KEY_ZERO   } ,
+    [0xB] = { .chip8 = CHIP8_KEY_B , .raylib = KEY_B      } ,
+    [0xF] = { .chip8 = CHIP8_KEY_F , .raylib = KEY_F      } ,
+};
+
 typedef struct {
     uint64_t frame_buffer[FRAME_H];
     int8_t sp;
@@ -201,6 +245,7 @@ typedef struct {
     uint16_t stack[STACK_SIZE];
     uint16_t pc;
     uint16_t regi;
+    uint16_t keyboard;
 } Chip8;
 
 bool read_rom_to_memory(Chip8 *chip8, const char *rom) {
@@ -332,9 +377,24 @@ int main(int argc, char **argv) {
     SetTraceLogLevel(LOG_ERROR);
     InitWindow(FRAME_W*WINDOW_FACTOR, FRAME_H*WINDOW_FACTOR, "Chip8");
 
+    float dt = 0.0;
     while (!WindowShouldClose()) {
         Op op = op_fetch(chip8);
         Op_Type type = op_decode(op);
+
+        dt += GetFrameTime();
+        if (dt >= 1/60.0) {
+            dt = 0;
+            if (chip8.delay_timer > 0) chip8.delay_timer--;
+            if (chip8.sound_timer > 0) chip8.sound_timer--;
+        }
+
+        chip8.keyboard &= 0;
+        for (int i = 0; i < 16; i++) {
+            if (IsKeyDown(keyboard_decode_table[i].raylib)) {
+                chip8.keyboard |= keyboard_decode_table[i].chip8;
+            }
+        }
 
 #if defined(DEBUG)
         printf("0x%04x: 0x%04x | DECODED: %s [%d]\n", chip8.pc, op, op_names[type], type);
@@ -538,7 +598,18 @@ int main(int argc, char **argv) {
 
             // Ex9E - SKP Vx
             case OP_SKP: {
-                TODO("OP_SKP");
+                uint8_t x = (op & 0x0F00) >> 8;
+                uint8_t key = chip8.regs[x];
+                if (key > 0xF) {
+                    fprintf(stderr, "ERROR: invalid key %d\n", key);
+                    return 1;
+                }
+
+                if (chip8.keyboard & keyboard_decode_table[key].chip8) {
+                    chip8.pc += 2;
+                }
+
+                chip8.pc += 2;
             } break;
 
             // ExA1 - SKNP Vx
@@ -594,7 +665,9 @@ int main(int argc, char **argv) {
 
             // Fx07 - LD Vx, DT
             case OP_LD_R_DT: {
-                TODO("OP_LD_R_DT");
+                uint8_t x = (op & 0x0F00) >> 8;
+                chip8.regs[x] = chip8.delay_timer;
+                chip8.pc += 2;
             } break;
 
             // Fx0A - LD Vx, K
@@ -604,7 +677,9 @@ int main(int argc, char **argv) {
 
             // Fx15 - LD DT, Vx
             case OP_LD_DT_R: {
-                TODO("OP_LD_DT_R");
+                uint8_t x = (op & 0x0F00) >> 8;
+                chip8.delay_timer = chip8.regs[x];
+                chip8.pc += 2;
             } break;
 
             // Fx18 - LD ST, Vx

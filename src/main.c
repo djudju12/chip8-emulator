@@ -301,27 +301,18 @@ Op_Type op_decode(Op op) {
     assert(0 && "unreacheable");
 }
 
-uint64_t rol(uint64_t x, uint8_t b) {
-    asm("rolq %1, %0"
-        : "=r"(x)           // Output operand: result goes into x
-        : "c"(b), "0"(x)    // Inputs: b goes into cl, x as input operand
-        :                   // No clobbers specified
-    );
-
-    return x;
-}
-
 bool is_pixel_active(Chip8 chip8, int x, int y) {
     return ((chip8.frame_buffer[y] << x) & ((uint64_t) 0x1 << 63)) != 0;
 }
 
 void blit_frame_buffer(Chip8 chip8) {
-    for (size_t y = 0; y < FRAME_H; y++) {
-        for (size_t x = 0; x < FRAME_W; x++) {
+    for (uint8_t y = 0; y < FRAME_H; y++) {
+        for (uint8_t x = 0; x < FRAME_W; x++) {
+            uint8_t mx = FRAME_W - 1 - x;
             if (is_pixel_active(chip8, x, y)) {
-                DrawRectangle(x*WINDOW_FACTOR, y*WINDOW_FACTOR, WINDOW_FACTOR, WINDOW_FACTOR, WHITE);
+                DrawRectangle(mx*WINDOW_FACTOR, y*WINDOW_FACTOR, WINDOW_FACTOR, WINDOW_FACTOR, WHITE);
             } else {
-                DrawRectangle(x*WINDOW_FACTOR, y*WINDOW_FACTOR, WINDOW_FACTOR, WINDOW_FACTOR, BLACK);
+                DrawRectangle(mx*WINDOW_FACTOR, y*WINDOW_FACTOR, WINDOW_FACTOR, WINDOW_FACTOR, BLACK);
             }
         }
     }
@@ -393,6 +384,7 @@ int main(int argc, char **argv) {
                  IsKeyUp(keyboard_decode_table[i].raylib)
             ) {
                 chip8.keyboard &= ~keyboard_decode_table[i].chip8;
+
                 if (waiting_for_key) {
                     waiting_for_key = false;
                     uint8_t x = (op & 0x0F00) >> 8;
@@ -404,9 +396,11 @@ int main(int argc, char **argv) {
         if (!waiting_for_key) {
             op = op_fetch(chip8);
             type = op_decode(op);
+
 #if defined(DEBUG)
             printf("0x%04x: 0x%04x | DECODED: %s [%d]\n", chip8.pc, op, op_names[type], type);
 #endif
+
             switch (type) {
                 // 00E0 - CLS
                 case OP_CLS: {
@@ -443,7 +437,7 @@ int main(int argc, char **argv) {
                 // 3xkk - SE Vx, byte
                 case OP_SE_RB: {
                     uint8_t x = (op & 0x0F00) >> 8;
-                    uint8_t k = op & 0x0FF;
+                    uint8_t k = op & 0x00FF;
                     if (chip8.regs[x] == k) {
                         chip8.pc += 2;
                     }
@@ -506,9 +500,10 @@ int main(int argc, char **argv) {
                     // I found very strange that we accept VY but dont use it
                     // Its actually a quirk -> https://chip8.gulrak.net/#quirk6
                     uint8_t x = (op & 0x0F00) >> 8;
-                    uint8_t vx = chip8.regs[x];
-                    chip8.regs[x] >>= 1;
-                    chip8.regs[0xF] = vx & 0x01;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    uint8_t vy = chip8.regs[y];
+                    chip8.regs[x] = vy >> 1;
+                    chip8.regs[0xF] = vy & 1;
                     chip8.pc += 2;
                 } break;
 
@@ -517,9 +512,10 @@ int main(int argc, char **argv) {
                     // I found very strange that we accept VY but dont use it
                     // Its actually a quirk -> https://chip8.gulrak.net/#quirk6
                     uint8_t x = (op & 0x0F00) >> 8;
-                    uint8_t vx = chip8.regs[x];
-                    chip8.regs[x] <<= 1;
-                    chip8.regs[0xF] = (vx >> 7) & 0x01;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    uint8_t vy = chip8.regs[y];
+                    chip8.regs[x] = vy << 1;
+                    chip8.regs[0xF] = (vy >> 7) & 1;
                     chip8.pc += 2;
                 } break;
 
@@ -576,33 +572,25 @@ int main(int argc, char **argv) {
                 // Dxyn - DRW Vx, Vy, nibble
                 case OP_DRW: {
                     chip8.regs[0xF] = 0;
-                    int8_t x = 63 - chip8.regs[(op & 0x0F00) >> 8];
-                    uint8_t y = chip8.regs[(op & 0x00F0) >> 4];
+                    int8_t x = chip8.regs[(op & 0x0F00) >> 8] % FRAME_W;
+                    uint8_t y = chip8.regs[(op & 0x00F0) >> 4] % FRAME_H;
                     uint8_t n = op & 0x000F;
-                    for (uint8_t i = 0; i < n; i++, y++) {
-                        if (y < 0 || y >= FRAME_H) {
-                            break;
+                    for (int8_t i = 0; y < FRAME_H && i < n; i++, y++) {
+                        uint16_t mem = chip8.regi + i;
+                        if (mem >= MEMORY_SIZE) {
+                            fprintf(stderr, "ERROR: out of bounds access\n");
+                            return 1;
                         }
 
-                        uint8_t sprite_byte = chip8.memory[chip8.regi + i];
-                        for (uint8_t k = 0; k < 8; k++) {
-                            int8_t index = x - k;
-                            if (index < 0 || index >= FRAME_W) {
-                                break;
-                            }
+                        uint8_t sprite_byte = chip8.memory[mem];
+                        for (uint8_t k = 0, index = x + k; index < FRAME_W && k < 8; k++, index = x + k) {
+                            uint8_t current_bit = (chip8.frame_buffer[y] >> index) & 1; // Get current state of pixel
+                            uint8_t sprite_bit = (sprite_byte >> (7 - k)) & 1;          // Get state from sprite
+                            uint64_t frame_bit = sprite_bit^current_bit;                // Get new pixel state
+                            chip8.frame_buffer[y] &= ~((uint64_t)1 << index);           // Clear the current pixel
+                            chip8.frame_buffer[y] |= frame_bit << index;                // Set bit on the frame buffer
 
-                            uint8_t current_bit = chip8.frame_buffer[y] & ((uint64_t)1 << index);
-
-                            uint64_t sprite_bit = (sprite_byte >> (7 - k)) & 1; // Get the bit from the sprite
-                            chip8.frame_buffer[y] ^= sprite_bit << index;       // Set the sprite bit on the frame buffer
-
-                            // XOR
-                            // C S R
-                            // 0 0 0
-                            // 0 1 1
-                            // 1 0 1
-                            // 1 1 0 -> erased
-                            chip8.regs[0xF] |= !(current_bit && sprite_bit);
+                            chip8.regs[0xF] |= current_bit & sprite_bit;
                         }
                     }
 
@@ -645,7 +633,7 @@ int main(int argc, char **argv) {
                 case OP_ADD_R_B: {
                     uint8_t x = (op & 0x0F00) >> 8;
                     uint8_t value = op & 0x00FF;
-                    chip8.regs[x] += value;
+                    chip8.regs[x] = (chip8.regs[x] + value) & 0xFF;
                     chip8.pc += 2;
                 } break;
 

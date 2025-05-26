@@ -6,7 +6,7 @@ LIBS=-lraylib -lm
 BIN=bin
 SRC=src
 
-DEFINES ?=
+DEFINES=DEBUG
 
 $(BIN)/chip8: $(SRC)/main.c $(BIN)
 	$(CC) $(addprefix -D, $(DEFINES)) $< $(CFLAGS) -o $@ $(LIBS)

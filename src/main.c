@@ -372,11 +372,11 @@ int main(int argc, char **argv) {
     SetTraceLogLevel(LOG_ERROR);
     InitWindow(FRAME_W*WINDOW_FACTOR, FRAME_H*WINDOW_FACTOR, "Chip8");
 
+    Op op;
+    Op_Type type;
     float dt = 0.0;
+    bool waiting_for_key = false;
     while (!WindowShouldClose()) {
-        Op op = op_fetch(chip8);
-        Op_Type type = op_decode(op);
-
         dt += GetFrameTime();
         if (dt >= 1/60.0) {
             dt = 0;
@@ -384,373 +384,391 @@ int main(int argc, char **argv) {
             if (chip8.sound_timer > 0) chip8.sound_timer--;
         }
 
-        chip8.keyboard &= 0;
         for (int i = 0; i < 16; i++) {
             if (IsKeyDown(keyboard_decode_table[i].raylib)) {
                 chip8.keyboard |= keyboard_decode_table[i].chip8;
             }
+
+            if ( chip8.keyboard & keyboard_decode_table[i].chip8 &&
+                 IsKeyUp(keyboard_decode_table[i].raylib)
+            ) {
+                chip8.keyboard &= ~keyboard_decode_table[i].chip8;
+                if (waiting_for_key) {
+                    waiting_for_key = false;
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    chip8.regs[x] = i;
+                }
+            }
         }
 
+        if (!waiting_for_key) {
+            op = op_fetch(chip8);
+            type = op_decode(op);
 #if defined(DEBUG)
-        printf("0x%04x: 0x%04x | DECODED: %s [%d]\n", chip8.pc, op, op_names[type], type);
+            printf("0x%04x: 0x%04x | DECODED: %s [%d]\n", chip8.pc, op, op_names[type], type);
 #endif
-
-        switch (type) {
-
-            // 00E0 - CLS
-            case OP_CLS: {
-                memset(chip8.frame_buffer, 0, sizeof(*chip8.frame_buffer)*FRAME_H);
-                chip8.pc += 2;
-            } break;
-
-            // 00EE - RET
-            case OP_RET: {
-                if (chip8.sp <= 0) {
-                    fprintf(stderr, "ERROR: stack underflow\n");
-                    return 1;
-                }
-
-                chip8.pc = chip8.stack[--chip8.sp];
-            } break;
-
-            // 2nnn - CALL addr
-            case OP_CALL: {
-                if (chip8.sp >= STACK_SIZE) {
-                    fprintf(stderr, "ERROR: stack overflow\n");
-                    return 1;
-                }
-
-                chip8.stack[chip8.sp++] = chip8.pc + 2;
-                chip8.pc = op & 0x0FFF;
-            } break;
-
-            // 0nnn - SYS addr
-            case OP_SYS: {
-                TODO("OP_SYS");
-            } break;
-
-            // 3xkk - SE Vx, byte
-            case OP_SE_RB: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t k = op & 0x0FF;
-                if (chip8.regs[x] == k) {
+            switch (type) {
+                // 00E0 - CLS
+                case OP_CLS: {
+                    memset(chip8.frame_buffer, 0, sizeof(*chip8.frame_buffer)*FRAME_H);
                     chip8.pc += 2;
-                }
+                } break;
 
-                chip8.pc += 2;
-            } break;
+                // 00EE - RET
+                case OP_RET: {
+                    if (chip8.sp <= 0) {
+                        fprintf(stderr, "ERROR: stack underflow\n");
+                        return 1;
+                    }
 
-            // 5xy0 - SE Vx, Vy
-            case OP_SE_RR: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                if (chip8.regs[x] == chip8.regs[y]) {
+                    chip8.pc = chip8.stack[--chip8.sp];
+                } break;
+
+                // 2nnn - CALL addr
+                case OP_CALL: {
+                    if (chip8.sp >= STACK_SIZE) {
+                        fprintf(stderr, "ERROR: stack overflow\n");
+                        return 1;
+                    }
+
+                    chip8.stack[chip8.sp++] = chip8.pc + 2;
+                    chip8.pc = op & 0x0FFF;
+                } break;
+
+                // 0nnn - SYS addr
+                case OP_SYS: {
+                    TODO("OP_SYS");
+                } break;
+
+                // 3xkk - SE Vx, byte
+                case OP_SE_RB: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t k = op & 0x0FF;
+                    if (chip8.regs[x] == k) {
+                        chip8.pc += 2;
+                    }
+
                     chip8.pc += 2;
-                }
+                } break;
 
-                chip8.pc += 2;
-            } break;
+                // 5xy0 - SE Vx, Vy
+                case OP_SE_RR: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    if (chip8.regs[x] == chip8.regs[y]) {
+                        chip8.pc += 2;
+                    }
 
-            // 8xy1 - OR Vx, Vy
-            case OP_OR: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                chip8.regs[x] |= chip8.regs[y];
-                chip8.pc += 2;
-            } break;
-
-            // 8xy2 - AND Vx, Vy
-            case OP_AND: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                chip8.regs[x] &= chip8.regs[y];
-                chip8.pc += 2;
-            } break;
-
-            // 8xy3 - XOR Vx, Vy
-            case OP_XOR: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                chip8.regs[x] ^= chip8.regs[y];
-                chip8.pc += 2;
-            } break;
-
-            // 8xy5 - SUB Vx, Vy
-            case OP_SUB: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                uint8_t vx = chip8.regs[x];
-                uint8_t vy = chip8.regs[y];
-
-                chip8.regs[x] = vx - vy;
-                chip8.regs[0xF] = vx >= vy;
-                chip8.pc += 2;
-            } break;
-
-            // 8xy6 - SHR Vx {, Vy}
-            case OP_SHR: {
-                // I found very strange that we accept VY but dont use it
-                // Its actually a quirk -> https://chip8.gulrak.net/#quirk6
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t vx = chip8.regs[x];
-                chip8.regs[x] >>= 1;
-                chip8.regs[0xF] = vx & 0x01;
-                chip8.pc += 2;
-            } break;
-
-            // 8xyE - SHL Vx {, Vy}
-            case OP_SHL: {
-                // I found very strange that we accept VY but dont use it
-                // Its actually a quirk -> https://chip8.gulrak.net/#quirk6
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t vx = chip8.regs[x];
-                chip8.regs[x] <<= 1;
-                chip8.regs[0xF] = (vx >> 7) & 0x01;
-                chip8.pc += 2;
-            } break;
-
-            // 8xy7 - SUBN Vx, Vy
-            case OP_SUBN: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                uint8_t vx = chip8.regs[x];
-                uint8_t vy = chip8.regs[y];
-
-                chip8.regs[x] = vy - vx;
-                chip8.regs[0xF] = vy >= vx;
-                chip8.pc += 2;
-            } break;
-
-            // 4xkk - SNE Vx, byte
-            case OP_SNE_R_B: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t k = op & 0x0FF;
-                if (chip8.regs[x] != k) {
                     chip8.pc += 2;
-                }
+                } break;
 
-                chip8.pc += 2;
-            } break;
-
-            // 9xy0 - SNE Vx, Vy
-            case OP_SNE_R_R: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                if (chip8.regs[x] != chip8.regs[y]) {
+                // 8xy1 - OR Vx, Vy
+                case OP_OR: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    chip8.regs[x] |= chip8.regs[y];
+                    chip8.regs[0xF] = 0;
                     chip8.pc += 2;
-                }
+                } break;
 
-                chip8.pc += 2;
-            } break;
+                // 8xy2 - AND Vx, Vy
+                case OP_AND: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    chip8.regs[x] &= chip8.regs[y];
+                    chip8.regs[0xF] = 0;
+                    chip8.pc += 2;
+                } break;
 
-            // 1nnn - JP addr
-            case OP_JP_ADDR: {
-                chip8.pc = op & 0x0FFF;
-            } break;
+                // 8xy3 - XOR Vx, Vy
+                case OP_XOR: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    chip8.regs[x] ^= chip8.regs[y];
+                    chip8.regs[0xF] = 0;
+                    chip8.pc += 2;
+                } break;
 
-            // Bnnn - JP V0, addr
-            case OP_JP_V0_ADDR: {
-                TODO("OP_JP_V0_ADDR");
-            } break;
+                // 8xy5 - SUB Vx, Vy
+                case OP_SUB: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    uint8_t vx = chip8.regs[x];
+                    uint8_t vy = chip8.regs[y];
 
-            // Cxkk - RND Vx, byte
-            case OP_RND: {
-                TODO("OP_RND");
-            } break;
+                    chip8.regs[x] = vx - vy;
+                    chip8.regs[0xF] = vx >= vy;
+                    chip8.pc += 2;
+                } break;
 
-            // Dxyn - DRW Vx, Vy, nibble
-            case OP_DRW: {
-                chip8.regs[0xF] = 0;
-                int8_t x = 63 - chip8.regs[(op & 0x0F00) >> 8];
-                uint8_t y = chip8.regs[(op & 0x00F0) >> 4];
-                uint8_t n = op & 0x000F;
-                for (uint8_t i = 0; i < n; i++, y++) {
-                    y %= FRAME_H;
-                    uint8_t sprite_byte = chip8.memory[chip8.regi + i];
-                    for (uint8_t k = 0; k < 8; k++) {
-                        int8_t index = x - k;
-                        if (index < 0) {
-                            index += 64;
+                // 8xy6 - SHR Vx {, Vy}
+                case OP_SHR: {
+                    // I found very strange that we accept VY but dont use it
+                    // Its actually a quirk -> https://chip8.gulrak.net/#quirk6
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t vx = chip8.regs[x];
+                    chip8.regs[x] >>= 1;
+                    chip8.regs[0xF] = vx & 0x01;
+                    chip8.pc += 2;
+                } break;
+
+                // 8xyE - SHL Vx {, Vy}
+                case OP_SHL: {
+                    // I found very strange that we accept VY but dont use it
+                    // Its actually a quirk -> https://chip8.gulrak.net/#quirk6
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t vx = chip8.regs[x];
+                    chip8.regs[x] <<= 1;
+                    chip8.regs[0xF] = (vx >> 7) & 0x01;
+                    chip8.pc += 2;
+                } break;
+
+                // 8xy7 - SUBN Vx, Vy
+                case OP_SUBN: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    uint8_t vx = chip8.regs[x];
+                    uint8_t vy = chip8.regs[y];
+
+                    chip8.regs[x] = vy - vx;
+                    chip8.regs[0xF] = vy >= vx;
+                    chip8.pc += 2;
+                } break;
+
+                // 4xkk - SNE Vx, byte
+                case OP_SNE_R_B: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t k = op & 0x0FF;
+                    if (chip8.regs[x] != k) {
+                        chip8.pc += 2;
+                    }
+
+                    chip8.pc += 2;
+                } break;
+
+                // 9xy0 - SNE Vx, Vy
+                case OP_SNE_R_R: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    if (chip8.regs[x] != chip8.regs[y]) {
+                        chip8.pc += 2;
+                    }
+
+                    chip8.pc += 2;
+                } break;
+
+                // 1nnn - JP addr
+                case OP_JP_ADDR: {
+                    chip8.pc = op & 0x0FFF;
+                } break;
+
+                // Bnnn - JP V0, addr
+                case OP_JP_V0_ADDR: {
+                    uint16_t addr = op & 0x0FFF;
+                    chip8.pc = addr + chip8.regs[0];
+                } break;
+
+                // Cxkk - RND Vx, byte
+                case OP_RND: {
+                    TODO("OP_RND");
+                } break;
+
+                // Dxyn - DRW Vx, Vy, nibble
+                case OP_DRW: {
+                    chip8.regs[0xF] = 0;
+                    int8_t x = 63 - chip8.regs[(op & 0x0F00) >> 8];
+                    uint8_t y = chip8.regs[(op & 0x00F0) >> 4];
+                    uint8_t n = op & 0x000F;
+                    for (uint8_t i = 0; i < n; i++, y++) {
+                        if (y < 0 || y >= FRAME_H) {
+                            break;
                         }
 
-                        uint8_t current_bit = chip8.frame_buffer[y] & ((uint64_t)1 << index);
+                        uint8_t sprite_byte = chip8.memory[chip8.regi + i];
+                        for (uint8_t k = 0; k < 8; k++) {
+                            int8_t index = x - k;
+                            if (index < 0 || index >= FRAME_W) {
+                                break;
+                            }
 
-                        uint64_t sprite_bit = (sprite_byte >> (7 - k)) & 1; // Get the bit from the sprite
-                        chip8.frame_buffer[y] ^= sprite_bit << index;       // Set the sprite bit on the frame buffer
+                            uint8_t current_bit = chip8.frame_buffer[y] & ((uint64_t)1 << index);
 
-                        // XOR
-                        // C S R
-                        // 0 0 0
-                        // 0 1 1
-                        // 1 0 1
-                        // 1 1 0 -> erased
-                        chip8.regs[0xF] |= !(current_bit && sprite_bit);
+                            uint64_t sprite_bit = (sprite_byte >> (7 - k)) & 1; // Get the bit from the sprite
+                            chip8.frame_buffer[y] ^= sprite_bit << index;       // Set the sprite bit on the frame buffer
+
+                            // XOR
+                            // C S R
+                            // 0 0 0
+                            // 0 1 1
+                            // 1 0 1
+                            // 1 1 0 -> erased
+                            chip8.regs[0xF] |= !(current_bit && sprite_bit);
+                        }
                     }
-                }
 
-                chip8.pc += 2;
-            } break;
-
-            // Ex9E - SKP Vx
-            case OP_SKP: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t key = chip8.regs[x];
-                if (key > 0xF) {
-                    fprintf(stderr, "ERROR: invalid key %d\n", key);
-                    return 1;
-                }
-
-                if (chip8.keyboard & keyboard_decode_table[key].chip8) {
                     chip8.pc += 2;
-                }
+                } break;
 
-                chip8.pc += 2;
-            } break;
-
-            // ExA1 - SKNP Vx
-            case OP_SKNP: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t key = chip8.regs[x];
-                if (key > 0xF) {
-                    fprintf(stderr, "ERROR: invalid key %d\n", key);
-                    return 1;
-                }
-
-                if (!(chip8.keyboard & keyboard_decode_table[key].chip8)) {
-                    chip8.pc += 2;
-                }
-
-                chip8.pc += 2;
-            } break;
-
-            // 7xkk - ADD Vx, byte
-            case OP_ADD_R_B: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t value = op & 0x00FF;
-                chip8.regs[x] += value;
-                chip8.pc += 2;
-            } break;
-
-            // 8xy4 - ADD Vx, Vy
-            case OP_ADD_R_R: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                uint16_t t = chip8.regs[x] + chip8.regs[y];
-                chip8.regs[x] = t;
-                chip8.regs[0xF] = t > 255;
-                chip8.pc += 2;
-            } break;
-
-            // Fx1E - ADD I, Vx
-            case OP_ADD_I_R: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                chip8.regi += chip8.regs[x];
-                chip8.pc += 2;
-            } break;
-
-            // 6xkk - LD Vx, byte
-            case OP_LD_R_B: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                chip8.regs[x] = op & 0x00FF;
-                chip8.pc += 2;
-            } break;
-
-            // 8xy0 - LD Vx, Vy
-            case OP_LD_R_R: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint8_t y = (op & 0x00F0) >> 4;
-                chip8.regs[x] = chip8.regs[y];
-                chip8.pc += 2;
-            } break;
-
-            // Annn - LD I, addr
-            case OP_LD_I_ADDR: {
-                chip8.regi = op & 0x0FFF;
-                chip8.pc += 2;
-            } break;
-
-            // Fx07 - LD Vx, DT
-            case OP_LD_R_DT: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                chip8.regs[x] = chip8.delay_timer;
-                chip8.pc += 2;
-            } break;
-
-            // Fx0A - LD Vx, K
-            case OP_LD_R_K: {
-                TODO("OP_LD_R_K");
-            } break;
-
-            // Fx15 - LD DT, Vx
-            case OP_LD_DT_R: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                chip8.delay_timer = chip8.regs[x];
-                chip8.pc += 2;
-            } break;
-
-            // Fx18 - LD ST, Vx
-            case OP_LD_ST_R: {
-                TODO("OP_LD_ST_R");
-            } break;
-
-            // Fx29 - LD F, Vx
-            case OP_LD_FONT_R: {
-                TODO("OP_LD_FONT_R");
-            } break;
-
-            // Fx33 - LD B, Vx
-            case OP_LD_BCD_R: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint16_t start = chip8.regi;
-                if (start >= (MEMORY_SIZE - 3)) {
-                    printf("ERROR: OP_LD_BCD_R out of bounds\n");
-                    return 1;
-                }
-
-                uint8_t v = chip8.regs[x];
-                chip8.memory[start + 0] = v / 100;
-                chip8.memory[start + 1] = (v / 10) % 10;
-                chip8.memory[start + 2] = (v % 10) % 10;
-                chip8.pc += 2;
-            } break;
-
-            // Fx55 - LD [I], Vx
-            case OP_LD_IMEM_R: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint16_t start = chip8.regi;
-                for (uint8_t i = 0; i <= x; i++) {
-                    uint16_t mem = start + i;
-                    if (mem >= MEMORY_SIZE) {
-                        printf("ERROR: OP_LD_R_IMEM out of bounds\n");
+                // Ex9E - SKP Vx
+                case OP_SKP: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t key = chip8.regs[x];
+                    if (key > 0xF) {
+                        fprintf(stderr, "ERROR: invalid key %d\n", key);
                         return 1;
                     }
 
-                    chip8.memory[mem] = chip8.regs[i];
-                }
+                    if (chip8.keyboard & keyboard_decode_table[key].chip8) {
+                        chip8.pc += 2;
+                    }
 
-                chip8.pc += 2;
-            } break;
+                    chip8.pc += 2;
+                } break;
 
-            // Fx65 - LD Vx, [I]
-            case OP_LD_R_IMEM: {
-                uint8_t x = (op & 0x0F00) >> 8;
-                uint16_t start = chip8.regi;
-                for (uint8_t i = 0; i <= x; i++) {
-                    uint16_t mem = start + i;
-                    if (mem >= MEMORY_SIZE) {
-                        printf("ERROR: OP_LD_R_IMEM out of bounds\n");
+                // ExA1 - SKNP Vx
+                case OP_SKNP: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t key = chip8.regs[x];
+                    if (key > 0xF) {
+                        fprintf(stderr, "ERROR: invalid key %d\n", key);
                         return 1;
                     }
 
-                    chip8.regs[i] = chip8.memory[mem];
+                    if (!(chip8.keyboard & keyboard_decode_table[key].chip8)) {
+                        chip8.pc += 2;
+                    }
+
+                    chip8.pc += 2;
+                } break;
+
+                // 7xkk - ADD Vx, byte
+                case OP_ADD_R_B: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t value = op & 0x00FF;
+                    chip8.regs[x] += value;
+                    chip8.pc += 2;
+                } break;
+
+                // 8xy4 - ADD Vx, Vy
+                case OP_ADD_R_R: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    uint16_t t = chip8.regs[x] + chip8.regs[y];
+                    chip8.regs[x] = t;
+                    chip8.regs[0xF] = t > 255;
+                    chip8.pc += 2;
+                } break;
+
+                // Fx1E - ADD I, Vx
+                case OP_ADD_I_R: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    chip8.regi += chip8.regs[x];
+                    chip8.pc += 2;
+                } break;
+
+                // 6xkk - LD Vx, byte
+                case OP_LD_R_B: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    chip8.regs[x] = op & 0x00FF;
+                    chip8.pc += 2;
+                } break;
+
+                // 8xy0 - LD Vx, Vy
+                case OP_LD_R_R: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t y = (op & 0x00F0) >> 4;
+                    chip8.regs[x] = chip8.regs[y];
+                    chip8.pc += 2;
+                } break;
+
+                // Annn - LD I, addr
+                case OP_LD_I_ADDR: {
+                    chip8.regi = op & 0x0FFF;
+                    chip8.pc += 2;
+                } break;
+
+                // Fx07 - LD Vx, DT
+                case OP_LD_R_DT: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    chip8.regs[x] = chip8.delay_timer;
+                    chip8.pc += 2;
+                } break;
+
+                // Fx0A - LD Vx, K
+                case OP_LD_R_K: {
+                    waiting_for_key = true;
+                    chip8.pc += 2;
+                } break;
+
+                // Fx15 - LD DT, Vx
+                case OP_LD_DT_R: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    chip8.delay_timer = chip8.regs[x];
+                    chip8.pc += 2;
+                } break;
+
+                // Fx18 - LD ST, Vx
+                case OP_LD_ST_R: {
+                    TODO("OP_LD_ST_R");
+                } break;
+
+                // Fx29 - LD F, Vx
+                case OP_LD_FONT_R: {
+                    TODO("OP_LD_FONT_R");
+                } break;
+
+                // Fx33 - LD B, Vx
+                case OP_LD_BCD_R: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint16_t start = chip8.regi;
+                    if (start >= (MEMORY_SIZE - 3)) {
+                        printf("ERROR: OP_LD_BCD_R out of bounds\n");
+                        return 1;
+                    }
+
+                    uint8_t v = chip8.regs[x];
+                    chip8.memory[start + 0] = v / 100;
+                    chip8.memory[start + 1] = (v / 10) % 10;
+                    chip8.memory[start + 2] = (v % 10) % 10;
+                    chip8.pc += 2;
+                } break;
+
+                // Fx55 - LD [I], Vx
+                case OP_LD_IMEM_R: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    for (uint8_t i = 0; i <= x; i++) {
+                        uint16_t mem = chip8.regi++;
+                        if (mem >= MEMORY_SIZE) {
+                            printf("ERROR: OP_LD_R_IMEM out of bounds\n");
+                            return 1;
+                        }
+
+                        chip8.memory[mem] = chip8.regs[i];
+                    }
+
+                    chip8.pc += 2;
+                } break;
+
+                // Fx65 - LD Vx, [I]
+                case OP_LD_R_IMEM: {
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    for (uint8_t i = 0; i <= x; i++) {
+                        uint16_t mem = chip8.regi++;
+                        if (mem >= MEMORY_SIZE) {
+                            printf("ERROR: OP_LD_R_IMEM out of bounds\n");
+                            return 1;
+                        }
+
+                        chip8.regs[i] = chip8.memory[mem];
+                    }
+
+                    chip8.pc += 2;
+                } break;
+
+                default: {
+                    fprintf(stderr, "ERROR: op %04x not implemented", op);
+                    return 1;
                 }
-
-                chip8.pc += 2;
-            } break;
-
-            default: {
-                fprintf(stderr, "ERROR: op %04x not implemented", op);
-                return 1;
             }
         }
 

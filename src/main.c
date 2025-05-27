@@ -241,6 +241,10 @@ typedef struct {
     uint16_t pc;
     uint16_t regi;
     uint16_t keyboard;
+
+    int cycles;
+    bool should_draw;
+    bool waiting_for_key;
 } Chip8;
 
 bool read_rom_to_memory(Chip8 *chip8, const char *rom) {
@@ -280,14 +284,16 @@ ERROR:
     return status;
 }
 
-Op op_fetch(Chip8 chip8) {
-    uint16_t addr = chip8.pc;
+Op op_fetch(Chip8 *chip8) {
+    uint16_t addr = chip8->pc;
     if (addr > MEMORY_SIZE - 1) {
         fprintf(stderr, "ERROR: trying to accessing a out of bound adress (%d)\n", addr);
         exit(1);
     }
 
-    return chip8.memory[addr] << 8 | chip8.memory[addr + 1];
+    chip8->cycles--;
+
+    return chip8->memory[addr] << 8 | chip8->memory[addr + 1];
 }
 
 Op_Type op_decode(Op op) {
@@ -315,6 +321,20 @@ void blit_frame_buffer(Chip8 chip8) {
                 DrawRectangle(mx*WINDOW_FACTOR, y*WINDOW_FACTOR, WINDOW_FACTOR, WINDOW_FACTOR, BLACK);
             }
         }
+    }
+}
+
+#define CYCLES_PER_SEC 8
+
+void tick_frame(Chip8 *chip8) {
+    static float dt = 0;
+    dt += GetFrameTime();
+    if (dt >= 1/60.0) {
+        dt = 0;
+        chip8->cycles = CYCLES_PER_SEC;
+        chip8->should_draw = true;
+        if (chip8->delay_timer > 0) chip8->delay_timer--;
+        if (chip8->sound_timer > 0) chip8->sound_timer--;
     }
 }
 
@@ -350,6 +370,7 @@ int main(int argc, char **argv) {
     }
 
     chip8.pc = 0x200;
+    chip8.cycles = CYCLES_PER_SEC;
 
 #if defined(DUMP_AND_DIE)
     chip8_dump(chip8);
@@ -365,16 +386,7 @@ int main(int argc, char **argv) {
 
     Op op;
     Op_Type type;
-    float dt = 0.0;
-    bool waiting_for_key = false;
     while (!WindowShouldClose()) {
-        dt += GetFrameTime();
-        if (dt >= 1/60.0) {
-            dt = 0;
-            if (chip8.delay_timer > 0) chip8.delay_timer--;
-            if (chip8.sound_timer > 0) chip8.sound_timer--;
-        }
-
         for (int i = 0; i < 16; i++) {
             if (IsKeyDown(keyboard_decode_table[i].raylib)) {
                 chip8.keyboard |= keyboard_decode_table[i].chip8;
@@ -385,16 +397,16 @@ int main(int argc, char **argv) {
             ) {
                 chip8.keyboard &= ~keyboard_decode_table[i].chip8;
 
-                if (waiting_for_key) {
-                    waiting_for_key = false;
+                if (chip8.waiting_for_key) {
+                    chip8.waiting_for_key = false;
                     uint8_t x = (op & 0x0F00) >> 8;
                     chip8.regs[x] = i;
                 }
             }
         }
 
-        if (!waiting_for_key) {
-            op = op_fetch(chip8);
+        if (chip8.cycles > 0 && !chip8.waiting_for_key) {
+            op = op_fetch(&chip8);
             type = op_decode(op);
 
 #if defined(DEBUG)
@@ -684,7 +696,7 @@ int main(int argc, char **argv) {
 
                 // Fx0A - LD Vx, K
                 case OP_LD_R_K: {
-                    waiting_for_key = true;
+                    chip8.waiting_for_key = true;
                     chip8.pc += 2;
                 } break;
 
@@ -761,8 +773,15 @@ int main(int argc, char **argv) {
         }
 
         BeginDrawing();
-        blit_frame_buffer(chip8);
+
+        if (chip8.should_draw) {
+            blit_frame_buffer(chip8);
+            chip8.should_draw = false;
+        }
+
         EndDrawing();
+
+        tick_frame(&chip8);
     }
 
     CloseWindow();

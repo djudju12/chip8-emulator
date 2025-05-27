@@ -392,6 +392,12 @@ void load_fonts(Chip8 *chip8) {
     chip8->memory[start++] = 0b10010000; // *  *
     chip8->memory[start++] = 0b11110000; // ****
 
+    chip8->memory[start++] = 0b00100000; //   *
+    chip8->memory[start++] = 0b01100000; //  **
+    chip8->memory[start++] = 0b00100000; //   *
+    chip8->memory[start++] = 0b00100000; //   *
+    chip8->memory[start++] = 0b01110000; //  ***
+
     chip8->memory[start++] = 0b11110000; // ****
     chip8->memory[start++] = 0b00010000; //    *
     chip8->memory[start++] = 0b11110000; // ****
@@ -399,45 +405,45 @@ void load_fonts(Chip8 *chip8) {
     chip8->memory[start++] = 0b11110000; // ****
 
     chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b00010000; //    *
     chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b00010000; //    *
     chip8->memory[start++] = 0b11110000; // ****
 
     chip8->memory[start++] = 0b10010000; // *  *
     chip8->memory[start++] = 0b10010000; // *  *
     chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b00010000; // *
-    chip8->memory[start++] = 0b00010000; // *
-
-    chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b10000000; // *
-    chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b00010000; // *
-    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; //    *
+    chip8->memory[start++] = 0b00010000; //    *
 
     chip8->memory[start++] = 0b11110000; // ****
     chip8->memory[start++] = 0b10000000; // *
     chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b00010000; //    *
     chip8->memory[start++] = 0b11110000; // ****
 
     chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b00010000; // *
-    chip8->memory[start++] = 0b00100000; // *
-    chip8->memory[start++] = 0b01000000; // *
-    chip8->memory[start++] = 0b01000000; // *
-
-    chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b10000000; // *
     chip8->memory[start++] = 0b11110000; // ****
     chip8->memory[start++] = 0b10010000; // *  *
     chip8->memory[start++] = 0b11110000; // ****
 
     chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; //    *
+    chip8->memory[start++] = 0b00100000; //   *
+    chip8->memory[start++] = 0b01000000; //  *
+    chip8->memory[start++] = 0b01000000; //  *
+
+    chip8->memory[start++] = 0b11110000; // ****
     chip8->memory[start++] = 0b10010000; // *  *
     chip8->memory[start++] = 0b11110000; // ****
-    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; //    *
     chip8->memory[start++] = 0b11110000; // ****
 
     chip8->memory[start++] = 0b11110000; // ****

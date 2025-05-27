@@ -13,6 +13,7 @@
 // each pixel in the frame buffer will map to WINDOW_FACTOR in the pc
 // running the emulator
 #define WINDOW_FACTOR 10
+#define CYCLES_PER_SEC 8
 
 #define TODO(msg) ASSERT(0 && msg)
 
@@ -326,8 +327,6 @@ void blit_frame_buffer(Chip8 chip8) {
         }
     }
 }
-
-#define CYCLES_PER_SEC 8
 
 void tick_frame(Chip8 *chip8) {
     static float dt = 0;

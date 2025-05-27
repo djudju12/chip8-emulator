@@ -388,20 +388,16 @@ int main(int argc, char **argv) {
     Op_Type type;
     while (!WindowShouldClose()) {
         for (int i = 0; i < 16; i++) {
-            if (IsKeyDown(keyboard_decode_table[i].raylib)) {
-                chip8.keyboard |= keyboard_decode_table[i].chip8;
-            }
-
-            if ( chip8.keyboard & keyboard_decode_table[i].chip8 &&
-                 IsKeyUp(keyboard_decode_table[i].raylib)
-            ) {
+            bool is_key_down = chip8.keyboard & keyboard_decode_table[i].chip8;
+            if (is_key_down && IsKeyUp(keyboard_decode_table[i].raylib)) {
                 chip8.keyboard &= ~keyboard_decode_table[i].chip8;
-
                 if (chip8.waiting_for_key) {
                     chip8.waiting_for_key = false;
                     uint8_t x = (op & 0x0F00) >> 8;
                     chip8.regs[x] = i;
                 }
+            } else if (IsKeyDown(keyboard_decode_table[i].raylib)) {
+                chip8.keyboard |= keyboard_decode_table[i].chip8;
             }
         }
 

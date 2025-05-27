@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <assert.h>
+#include <math.h>
 #include <raylib.h>
 
 #define ASSERT assert
@@ -245,6 +246,7 @@ typedef struct {
     int cycles;
     bool should_draw;
     bool waiting_for_key;
+    bool update_audio_state;
 } Chip8;
 
 bool read_rom_to_memory(Chip8 *chip8, const char *rom) {
@@ -334,7 +336,12 @@ void tick_frame(Chip8 *chip8) {
         chip8->cycles = CYCLES_PER_SEC;
         chip8->should_draw = true;
         if (chip8->delay_timer > 0) chip8->delay_timer--;
-        if (chip8->sound_timer > 0) chip8->sound_timer--;
+        if (chip8->sound_timer > 0) {
+            chip8->sound_timer--;
+            if (chip8->sound_timer == 0) {
+                chip8->update_audio_state = true;
+            }
+        }
     }
 }
 
@@ -347,6 +354,29 @@ void chip8_dump(Chip8 chip8) {
         }
 
         printf("\n");
+    }
+}
+
+// https://www.raylib.com/examples/audio/loader.html?name=audio_raw_stream
+#define MAX_SAMPLES               512
+#define MAX_SAMPLES_PER_UPDATE   4096
+#define FREQUENCY 440.0f // (hz)
+
+// Audio input processing callback
+void AudioInputCallback(void *buffer, unsigned int frames)
+{
+    static float sineIdx = 0.0f;
+    static float audioFrequency = FREQUENCY;
+    audioFrequency = FREQUENCY + (audioFrequency - FREQUENCY)*0.95f;
+
+    float incr = audioFrequency/44100.0f;
+    short *d = (short *)buffer;
+
+    for (unsigned int i = 0; i < frames; i++)
+    {
+        d[i] = (short)(32000.0f*sinf(2*PI*sineIdx));
+        sineIdx += incr;
+        if (sineIdx > 1.0f) sineIdx -= 1.0f;
     }
 }
 
@@ -381,12 +411,27 @@ int main(int argc, char **argv) {
     chip8_dump(chip8);
 #endif
 
-    SetTraceLogLevel(LOG_ERROR);
+    // SetTraceLogLevel(LOG_ERROR);
     InitWindow(FRAME_W*WINDOW_FACTOR, FRAME_H*WINDOW_FACTOR, "Chip8");
+
+    InitAudioDevice();
+    SetAudioStreamBufferSizeDefault(MAX_SAMPLES_PER_UPDATE);
+
+    // Init raw audio stream (sample rate: 44100, sample size: 16bit-short, channels: 1-mono)
+    AudioStream stream = LoadAudioStream(44100, 16, 1);
+    SetAudioStreamCallback(stream, AudioInputCallback);
 
     Op op;
     Op_Type type;
     while (!WindowShouldClose()) {
+        if (chip8.update_audio_state) {
+            if (chip8.sound_timer > 0) {
+                PlayAudioStream(stream);
+            } else {
+                StopAudioStream(stream);
+            }
+        }
+
         for (int i = 0; i < 16; i++) {
             bool is_key_down = chip8.keyboard & keyboard_decode_table[i].chip8;
             if (is_key_down && IsKeyUp(keyboard_decode_table[i].raylib)) {
@@ -705,7 +750,10 @@ int main(int argc, char **argv) {
 
                 // Fx18 - LD ST, Vx
                 case OP_LD_ST_R: {
-                    TODO("OP_LD_ST_R");
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    chip8.sound_timer = chip8.regs[x];
+                    chip8.update_audio_state = true;
+                    chip8.pc += 2;
                 } break;
 
                 // Fx29 - LD F, Vx
@@ -780,6 +828,8 @@ int main(int argc, char **argv) {
         tick_frame(&chip8);
     }
 
+    UnloadAudioStream(stream);
+    CloseAudioDevice();
     CloseWindow();
 
     return 0;

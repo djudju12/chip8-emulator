@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <math.h>
+#include <time.h>
 #include <raylib.h>
 
 #define ASSERT assert
@@ -384,6 +385,99 @@ char *shift(int *argc, char ***argv) {
     return (*argc)--, *(*argv)++;
 }
 
+void load_fonts(Chip8 *chip8) {
+    uint16_t start = 0x000;
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; //    *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b00010000; // *
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b00100000; // *
+    chip8->memory[start++] = 0b01000000; // *
+    chip8->memory[start++] = 0b01000000; // *
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b00010000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b10010000; // *  *
+
+    chip8->memory[start++] = 0b11100000; // ***
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11100000; // ***
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11100000; // ***
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11100000; // ***
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b10010000; // *  *
+    chip8->memory[start++] = 0b11100000; // ***
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b11110000; // ****
+    chip8->memory[start++] = 0b10000000; // *
+    chip8->memory[start++] = 0b10000000; // *
+}
+
 int main(int argc, char **argv) {
     char *program_name = shift(&argc, &argv);
     if (argc <= 0) {
@@ -392,15 +486,17 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-
     Chip8 chip8 = {0};
     char *rom = shift(&argc, &argv);
     if (!read_rom_to_memory(&chip8, rom)) {
         return 1;
     }
 
+    srand(time(NULL));
+
     chip8.pc = 0x200;
     chip8.cycles = CYCLES_PER_SEC;
+    load_fonts(&chip8);
 
 #if defined(DUMP_AND_DIE)
     chip8_dump(chip8);
@@ -411,7 +507,10 @@ int main(int argc, char **argv) {
     chip8_dump(chip8);
 #endif
 
-    // SetTraceLogLevel(LOG_ERROR);
+#if !defined(DEBUG)
+    SetTraceLogLevel(LOG_ERROR);
+#endif
+
     InitWindow(FRAME_W*WINDOW_FACTOR, FRAME_H*WINDOW_FACTOR, "Chip8");
 
     InitAudioDevice();
@@ -619,7 +718,10 @@ int main(int argc, char **argv) {
 
                 // Cxkk - RND Vx, byte
                 case OP_RND: {
-                    TODO("OP_RND");
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    uint8_t k = op & 0x0FF;
+                    chip8.regs[x] = ((uint8_t) rand()) & k;
+                    chip8.pc += 2;
                 } break;
 
                 // Dxyn - DRW Vx, Vy, nibble
@@ -758,7 +860,9 @@ int main(int argc, char **argv) {
 
                 // Fx29 - LD F, Vx
                 case OP_LD_FONT_R: {
-                    TODO("OP_LD_FONT_R");
+                    uint8_t x = (op & 0x0F00) >> 8;
+                    chip8.regi = chip8.regs[x]*5;
+                    chip8.pc += 2;
                 } break;
 
                 // Fx33 - LD B, Vx
